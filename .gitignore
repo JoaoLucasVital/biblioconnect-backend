@@ -1,5 +1,9 @@
-node_modules/
+node_modules
 .env
-dist/
-build/
-npm-debug.log
+dist
+build
+.DS_Store
+
+frontend/node_modules
+frontend/dist
+frontend/.env
