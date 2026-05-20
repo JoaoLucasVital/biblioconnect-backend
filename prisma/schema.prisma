@@ -5,20 +5,25 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
-
 }
 
 model Usuario {
-  id        Int      @id @default(autoincrement())
-  nome      String
-  email     String   @unique
-  telefone  String
-  endereco  String
-  pedidos   Pedido[]
+  id              Int      @id @default(autoincrement())
+  nome            String
+  email           String   @unique
+  senha           String
+  telefone        String?
+  endereco        String?
+  role            String   @default("CLIENTE")
+  emailConfirmado Boolean  @default(false)
+  bloqueado       Boolean  @default(false)
+  createdAt       DateTime @default(now())
+
+  pedidos         Pedido[]
 }
 
 model Livro {
-  id              Int     @id @default(autoincrement())
+  id              Int      @id @default(autoincrement())
   titulo          String
   autor           String
   redator         String
@@ -30,15 +35,22 @@ model Livro {
   diasInclusos    Int
   precoDiaExtra   Float
   estoque         Int
-  isDoado         Boolean @default(false)
+  isDoado         Boolean  @default(false)
 
-  pedidos Pedido[]
+  destaque        Boolean  @default(false)
+  disponivel      Boolean  @default(true)
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  pedidos         Pedido[]
 }
 
 model Pedido {
   id                 Int      @id @default(autoincrement())
   tipo               String
   status             String
+  statusPagamento    String   @default("pendente")
   valor              Float
   diasAluguel        Int?
   retiradaLimite     DateTime
