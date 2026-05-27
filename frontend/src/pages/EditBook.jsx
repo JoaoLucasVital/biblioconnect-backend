@@ -2,6 +2,18 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import api from "../api/api.js";
 
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
+
+function montarUrlImagem(imagemUrl) {
+  if (!imagemUrl) return "";
+
+  if (imagemUrl.startsWith("http://") || imagemUrl.startsWith("https://")) {
+    return imagemUrl;
+  }
+
+  return `${API_URL}${imagemUrl}`;
+}
+
 function EditBook() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -23,6 +35,10 @@ function EditBook() {
     disponivel: true,
   });
 
+  const [imagemAtual, setImagemAtual] = useState("");
+  const [novaImagem, setNovaImagem] = useState(null);
+  const [previewImagem, setPreviewImagem] = useState("");
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [erro, setErro] = useState("");
@@ -34,7 +50,6 @@ function EditBook() {
       setErro("");
 
       const response = await api.get(`/livros/${id}`);
-
       const livro = response.data;
 
       setForm({
@@ -53,6 +68,8 @@ function EditBook() {
         destaque: Boolean(livro.destaque),
         disponivel: Boolean(livro.disponivel),
       });
+
+      setImagemAtual(livro.imagemUrl || "");
     } catch (error) {
       setErro(error.response?.data?.erro || "Erro ao carregar livro.");
     } finally {
@@ -69,6 +86,70 @@ function EditBook() {
     }));
   }
 
+  function handleImagemChange(event) {
+    const arquivo = event.target.files?.[0];
+
+    if (!arquivo) {
+      setNovaImagem(null);
+      setPreviewImagem("");
+      return;
+    }
+
+    const formatosPermitidos = [
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "image/jpg",
+    ];
+
+    if (!formatosPermitidos.includes(arquivo.type)) {
+      setErro("Envie uma imagem nos formatos JPG, PNG ou WEBP.");
+      setNovaImagem(null);
+      setPreviewImagem("");
+      event.target.value = "";
+      return;
+    }
+
+    const tamanhoMaximo = 5 * 1024 * 1024;
+
+    if (arquivo.size > tamanhoMaximo) {
+      setErro("A imagem deve ter no máximo 5MB.");
+      setNovaImagem(null);
+      setPreviewImagem("");
+      event.target.value = "";
+      return;
+    }
+
+    setErro("");
+    setNovaImagem(arquivo);
+    setPreviewImagem(URL.createObjectURL(arquivo));
+  }
+
+  function montarFormData() {
+    const dados = new FormData();
+
+    dados.append("titulo", form.titulo);
+    dados.append("autor", form.autor);
+    dados.append("redator", form.redator);
+    dados.append("ano", form.ano);
+    dados.append("categoria", form.categoria);
+    dados.append("sinopse", form.sinopse);
+    dados.append("precoCompra", form.precoCompra);
+    dados.append("precoAluguel", form.precoAluguel);
+    dados.append("diasInclusos", form.diasInclusos);
+    dados.append("precoDiaExtra", form.precoDiaExtra);
+    dados.append("estoque", form.estoque);
+    dados.append("isDoado", String(form.isDoado));
+    dados.append("destaque", String(form.destaque));
+    dados.append("disponivel", String(form.disponivel));
+
+    if (novaImagem) {
+      dados.append("imagem", novaImagem);
+    }
+
+    return dados;
+  }
+
   async function handleSubmit(event) {
     event.preventDefault();
 
@@ -77,24 +158,13 @@ function EditBook() {
     setSucesso("");
 
     try {
-      const dadosLivro = {
-        titulo: form.titulo,
-        autor: form.autor,
-        redator: form.redator,
-        ano: Number(form.ano),
-        categoria: form.categoria,
-        sinopse: form.sinopse,
-        precoCompra: Number(form.precoCompra),
-        precoAluguel: Number(form.precoAluguel),
-        diasInclusos: Number(form.diasInclusos),
-        precoDiaExtra: Number(form.precoDiaExtra),
-        estoque: Number(form.estoque),
-        isDoado: form.isDoado,
-        destaque: form.destaque,
-        disponivel: form.disponivel,
-      };
+      const dadosLivro = montarFormData();
 
-      await api.put(`/livros/${id}`, dadosLivro);
+      await api.put(`/livros/${id}`, dadosLivro, {
+        headers: {
+          "Content-Type": "multipart/form-data",
+        },
+      });
 
       setSucesso("Livro atualizado com sucesso!");
 
@@ -112,6 +182,14 @@ function EditBook() {
     carregarLivro();
   }, [id]);
 
+  useEffect(() => {
+    return () => {
+      if (previewImagem) {
+        URL.revokeObjectURL(previewImagem);
+      }
+    };
+  }, [previewImagem]);
+
   if (loading) {
     return (
       <main className="page">
@@ -122,6 +200,8 @@ function EditBook() {
     );
   }
 
+  const imagemParaExibir = previewImagem || montarUrlImagem(imagemAtual);
+
   return (
     <main className="page">
       <div className="container">
@@ -129,7 +209,8 @@ function EditBook() {
           <div>
             <h1 className="page-title">Editar Livro</h1>
             <p className="page-subtitle">
-              Atualize as informações, destaque e disponibilidade do livro.
+              Atualize as informações, destaque, disponibilidade e imagem do
+              livro.
             </p>
           </div>
 
@@ -142,6 +223,63 @@ function EditBook() {
         </div>
 
         <form className="book-form" onSubmit={handleSubmit}>
+          <div className="form-section book-image-section">
+            <div>
+              <h2>Capa do livro</h2>
+              <p className="form-helper">
+                A capa atual será mantida se você não selecionar uma nova
+                imagem.
+              </p>
+            </div>
+
+            <div className="book-upload-grid">
+              <div className="book-cover-preview-box">
+                {imagemParaExibir ? (
+                  <img
+                    src={imagemParaExibir}
+                    alt="Capa atual do livro"
+                    className="book-cover-preview-img"
+                  />
+                ) : (
+                  <div className="book-cover-placeholder">
+                    <span>Sem imagem</span>
+                    <small>Este livro ainda não possui capa cadastrada</small>
+                  </div>
+                )}
+              </div>
+
+              <div className="form-group">
+                <label>Trocar imagem da capa</label>
+                <input
+                  type="file"
+                  name="imagem"
+                  accept="image/jpeg,image/png,image/webp,image/jpg"
+                  onChange={handleImagemChange}
+                />
+
+                <small className="input-hint">
+                  Tamanho máximo: 5MB. Formatos aceitos: JPG, PNG ou WEBP.
+                </small>
+
+                {novaImagem ? (
+                  <div className="selected-file-info">
+                    <strong>Nova imagem selecionada:</strong>
+                    <span>{novaImagem.name}</span>
+                  </div>
+                ) : (
+                  <div className="selected-file-info">
+                    <strong>Imagem atual:</strong>
+                    <span>
+                      {imagemAtual
+                        ? "A capa cadastrada será mantida."
+                        : "Nenhuma imagem cadastrada ainda."}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
           <div className="form-section">
             <h2>Informações principais</h2>
 

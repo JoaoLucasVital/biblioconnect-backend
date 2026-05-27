@@ -3,11 +3,72 @@ import { Link } from "react-router-dom";
 import api from "../api/api.js";
 import { useAuth } from "../context/AuthContext.jsx";
 
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
+
+function montarUrlImagem(imagemUrl) {
+  if (!imagemUrl) return "";
+
+  if (imagemUrl.startsWith("http://") || imagemUrl.startsWith("https://")) {
+    return imagemUrl;
+  }
+
+  return `${API_URL}${imagemUrl}`;
+}
+
 function formatarMoeda(valor) {
   return Number(valor || 0).toLocaleString("pt-BR", {
     style: "currency",
     currency: "BRL",
   });
+}
+
+function HomeBookCover({ livro }) {
+  const imagem = montarUrlImagem(livro?.imagemUrl);
+
+  return (
+    <div className="featured-book-cover home-real-book-cover">
+      {imagem ? (
+        <img
+          src={imagem}
+          alt={`Capa do livro ${livro.titulo}`}
+          loading="lazy"
+          onError={(event) => {
+            event.currentTarget.style.display = "none";
+            event.currentTarget.nextElementSibling?.classList.remove("hidden");
+          }}
+        />
+      ) : null}
+
+      <div className={imagem ? "home-cover-fallback hidden" : "home-cover-fallback"}>
+        <span>{livro?.titulo?.slice(0, 2)?.toUpperCase()}</span>
+        <small>{livro?.categoria}</small>
+      </div>
+    </div>
+  );
+}
+
+function RankingCover({ livro }) {
+  const imagem = montarUrlImagem(livro?.imagemUrl);
+
+  return (
+    <div className="ranking-book-cover-mini">
+      {imagem ? (
+        <img
+          src={imagem}
+          alt={`Capa do livro ${livro.titulo}`}
+          loading="lazy"
+          onError={(event) => {
+            event.currentTarget.style.display = "none";
+            event.currentTarget.nextElementSibling?.classList.remove("hidden");
+          }}
+        />
+      ) : null}
+
+      <div className={imagem ? "ranking-cover-fallback hidden" : "ranking-cover-fallback"}>
+        {livro?.titulo?.slice(0, 2)?.toUpperCase()}
+      </div>
+    </div>
+  );
 }
 
 function Home() {
@@ -105,6 +166,12 @@ function Home() {
 
     return () => clearInterval(interval);
   }, [currentBanner, livrosDestaque.length]);
+
+  useEffect(() => {
+    if (currentBanner > livrosDestaque.length - 1) {
+      setCurrentBanner(0);
+    }
+  }, [livrosDestaque.length, currentBanner]);
 
   const banner = livrosDestaque[currentBanner];
 
@@ -242,10 +309,7 @@ function Home() {
                 </Link>
               </div>
 
-              <div className="featured-book-cover">
-                <span>{banner.titulo?.slice(0, 2)?.toUpperCase()}</span>
-                <small>{banner.categoria}</small>
-              </div>
+              <HomeBookCover livro={banner} />
             </article>
 
             <div className="slider-dots clean-dots">
@@ -296,8 +360,10 @@ function Home() {
             {insights.livrosMaisVendidos?.length > 0 ? (
               <div className="ranking-list">
                 {insights.livrosMaisVendidos.map((livro, index) => (
-                  <div className="ranking-row" key={livro.id}>
+                  <div className="ranking-row ranking-row-with-cover" key={livro.id}>
                     <span className="ranking-position">{index + 1}</span>
+
+                    <RankingCover livro={livro} />
 
                     <div>
                       <strong>{livro.titulo}</strong>

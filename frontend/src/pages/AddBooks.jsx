@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../api/api.js";
 
@@ -22,6 +22,9 @@ function AddBooks() {
     disponivel: true,
   });
 
+  const [imagem, setImagem] = useState(null);
+  const [previewImagem, setPreviewImagem] = useState("");
+
   const [erro, setErro] = useState("");
   const [loading, setLoading] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -35,29 +38,77 @@ function AddBooks() {
     }));
   }
 
+  function handleImagemChange(event) {
+    const arquivo = event.target.files?.[0];
+
+    if (!arquivo) {
+      setImagem(null);
+      setPreviewImagem("");
+      return;
+    }
+
+    const formatosPermitidos = ["image/jpeg", "image/png", "image/webp", "image/jpg"];
+
+    if (!formatosPermitidos.includes(arquivo.type)) {
+      setErro("Envie uma imagem nos formatos JPG, PNG ou WEBP.");
+      setImagem(null);
+      setPreviewImagem("");
+      event.target.value = "";
+      return;
+    }
+
+    const tamanhoMaximo = 5 * 1024 * 1024;
+
+    if (arquivo.size > tamanhoMaximo) {
+      setErro("A imagem deve ter no máximo 5MB.");
+      setImagem(null);
+      setPreviewImagem("");
+      event.target.value = "";
+      return;
+    }
+
+    setErro("");
+    setImagem(arquivo);
+    setPreviewImagem(URL.createObjectURL(arquivo));
+  }
+
+  function montarFormData() {
+    const dados = new FormData();
+
+    dados.append("titulo", form.titulo);
+    dados.append("autor", form.autor);
+    dados.append("redator", form.redator);
+    dados.append("ano", form.ano);
+    dados.append("categoria", form.categoria);
+    dados.append("sinopse", form.sinopse);
+    dados.append("precoCompra", form.precoCompra);
+    dados.append("precoAluguel", form.precoAluguel);
+    dados.append("diasInclusos", form.diasInclusos);
+    dados.append("precoDiaExtra", form.precoDiaExtra);
+    dados.append("estoque", form.estoque);
+    dados.append("isDoado", String(form.isDoado));
+    dados.append("destaque", String(form.destaque));
+    dados.append("disponivel", String(form.disponivel));
+
+    if (imagem) {
+      dados.append("imagem", imagem);
+    }
+
+    return dados;
+  }
+
   async function cadastrarLivro() {
     setErro("");
     setLoading(true);
 
     try {
-      const dadosLivro = {
-        titulo: form.titulo,
-        autor: form.autor,
-        redator: form.redator,
-        ano: Number(form.ano),
-        categoria: form.categoria,
-        sinopse: form.sinopse,
-        precoCompra: Number(form.precoCompra),
-        precoAluguel: Number(form.precoAluguel),
-        diasInclusos: Number(form.diasInclusos),
-        precoDiaExtra: Number(form.precoDiaExtra),
-        estoque: Number(form.estoque),
-        isDoado: form.isDoado,
-        destaque: form.destaque,
-        disponivel: form.disponivel,
-      };
+      const dadosLivro = montarFormData();
 
-      await api.post("/livros", dadosLivro);
+      await api.post("/livros", dadosLivro, {
+        headers: {
+          "Content-Type": "multipart/form-data",
+        },
+      });
 
       setShowConfirm(false);
       navigate("/admin/livros");
@@ -71,8 +122,22 @@ function AddBooks() {
 
   function handleSubmit(event) {
     event.preventDefault();
+
+    if (!form.titulo || !form.autor || !form.categoria || !form.sinopse) {
+      setErro("Preencha as informações principais do livro.");
+      return;
+    }
+
     setShowConfirm(true);
   }
+
+  useEffect(() => {
+    return () => {
+      if (previewImagem) {
+        URL.revokeObjectURL(previewImagem);
+      }
+    };
+  }, [previewImagem]);
 
   return (
     <main className="page">
@@ -91,6 +156,53 @@ function AddBooks() {
         </div>
 
         <form className="book-form" onSubmit={handleSubmit}>
+          <div className="form-section book-image-section">
+            <div>
+              <h2>Capa do livro</h2>
+              <p className="form-helper">
+                Envie uma imagem em JPG, PNG ou WEBP. Ela aparecerá no catálogo,
+                no painel admin e no slider da Home quando o livro estiver em destaque.
+              </p>
+            </div>
+
+            <div className="book-upload-grid">
+              <div className="book-cover-preview-box">
+                {previewImagem ? (
+                  <img
+                    src={previewImagem}
+                    alt="Prévia da capa do livro"
+                    className="book-cover-preview-img"
+                  />
+                ) : (
+                  <div className="book-cover-placeholder">
+                    <span>Sem imagem</span>
+                    <small>A prévia da capa aparecerá aqui</small>
+                  </div>
+                )}
+              </div>
+
+              <div className="form-group">
+                <label>Imagem da capa</label>
+                <input
+                  type="file"
+                  name="imagem"
+                  accept="image/jpeg,image/png,image/webp,image/jpg"
+                  onChange={handleImagemChange}
+                />
+                <small className="input-hint">
+                  Tamanho máximo: 5MB. Recomendado: imagem vertical de capa.
+                </small>
+
+                {imagem && (
+                  <div className="selected-file-info">
+                    <strong>Arquivo selecionado:</strong>
+                    <span>{imagem.name}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
           <div className="form-section">
             <h2>Informações principais</h2>
 
@@ -286,8 +398,8 @@ function AddBooks() {
       </div>
 
       {showConfirm && (
-        <div className="popup-overlay">
-          <div className="popup-card">
+        <div className="popup-overlay final-modal-overlay">
+          <div className="popup-card final-modal-card">
             <h2>Confirmar cadastro</h2>
 
             <p>
@@ -299,10 +411,15 @@ function AddBooks() {
               <span>Autor: {form.autor}</span>
               <span>Categoria: {form.categoria}</span>
               <span>Estoque: {form.estoque}</span>
-              <span>
-                Destaque: {form.destaque ? "Sim" : "Não"}
-              </span>
+              <span>Destaque: {form.destaque ? "Sim" : "Não"}</span>
+              <span>Imagem: {imagem ? imagem.name : "Não enviada"}</span>
             </div>
+
+            {previewImagem && (
+              <div className="popup-image-preview">
+                <img src={previewImagem} alt="Prévia da capa no popup" />
+              </div>
+            )}
 
             <div className="popup-actions">
               <button

@@ -10,6 +10,8 @@ import Home from "./pages/Home.jsx";
 import Books from "./pages/Books.jsx";
 import Login from "./pages/Login.jsx";
 import Register from "./pages/Register.jsx";
+import ForgotPassword from "./pages/ForgotPassword.jsx";
+import ResetPassword from "./pages/ResetPassword.jsx";
 
 import AdminDashboard from "./pages/AdminDashboard.jsx";
 import AddBook from "./pages/AddBooks.jsx";
@@ -37,6 +39,8 @@ function App() {
           <Route path="/livros" element={<Books />} />
           <Route path="/login" element={<Login />} />
           <Route path="/cadastro" element={<Register />} />
+          <Route path="/esqueci-senha" element={<ForgotPassword />} />
+          <Route path="/redefinir-senha/:token" element={<ResetPassword />} />
 
           <Route
             path="/meus-pedidos"

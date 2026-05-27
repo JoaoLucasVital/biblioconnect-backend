@@ -8,6 +8,8 @@ function Login() {
 
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
+  const [mostrarSenha, setMostrarSenha] = useState(false);
+
   const [erro, setErro] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -49,14 +51,32 @@ function Login() {
           </div>
 
           <div className="form-group">
-            <label>Senha</label>
-            <input
-              type="password"
-              placeholder="Digite sua senha"
-              value={senha}
-              onChange={(event) => setSenha(event.target.value)}
-              required
-            />
+            <div className="password-label-row">
+              <label>Senha</label>
+
+              <Link to="/esqueci-senha" className="forgot-password-link">
+                Esqueci minha senha
+              </Link>
+            </div>
+
+            <div className="password-input-box">
+              <input
+                type={mostrarSenha ? "text" : "password"}
+                placeholder="Digite sua senha"
+                value={senha}
+                onChange={(event) => setSenha(event.target.value)}
+                required
+              />
+
+              <button
+                type="button"
+                className="password-eye-btn"
+                onClick={() => setMostrarSenha((prev) => !prev)}
+                aria-label={mostrarSenha ? "Ocultar senha" : "Mostrar senha"}
+              >
+                {mostrarSenha ? "Ocultar" : "Mostrar"}
+              </button>
+            </div>
           </div>
 
           {erro && <p className="feedback-banner error">{erro}</p>}

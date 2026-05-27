@@ -3,6 +3,11 @@ import cors from "cors";
 import dotenv from "dotenv";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import crypto from "crypto";
+import multer from "multer";
+import path from "path";
+import fs from "fs";
+import { fileURLToPath } from "url";
 import { PrismaClient } from "@prisma/client";
 import nodemailer from "nodemailer";
 
@@ -15,6 +20,80 @@ app.use(cors());
 app.use(express.json());
 
 const JWT_SECRET = process.env.JWT_SECRET || "biblioconnect_secret_dev";
+const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:3000";
+const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
+
+// ======================
+// UPLOADS - IMAGENS DOS LIVROS
+// ======================
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const uploadDir = path.join(__dirname, "uploads", "livros");
+
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+
+const storageLivros = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    const extensao = path.extname(file.originalname);
+    const nomeOriginal = path
+      .basename(file.originalname, extensao)
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-zA-Z0-9]/g, "-")
+      .toLowerCase();
+
+    const nomeArquivo = `${Date.now()}-${nomeOriginal}${extensao}`;
+
+    cb(null, nomeArquivo);
+  },
+});
+
+const filtroImagemLivro = (req, file, cb) => {
+  const tiposPermitidos = ["image/jpeg", "image/png", "image/webp", "image/jpg"];
+
+  if (!tiposPermitidos.includes(file.mimetype)) {
+    return cb(new Error("Formato inválido. Envie uma imagem JPG, PNG ou WEBP."));
+  }
+
+  cb(null, true);
+};
+
+const uploadLivro = multer({
+  storage: storageLivros,
+  fileFilter: filtroImagemLivro,
+  limits: {
+    fileSize: 5 * 1024 * 1024,
+  },
+});
+
+// ======================
+// AUXILIARES PARA FORMULÁRIOS MULTIPART
+// ======================
+function converterBoolean(valor, padrao = false) {
+  if (valor === undefined || valor === null || valor === "") {
+    return padrao;
+  }
+
+  if (typeof valor === "boolean") {
+    return valor;
+  }
+
+  return String(valor).toLowerCase() === "true";
+}
+
+function montarImagemUrl(req) {
+  if (!req.file) return null;
+
+  return `/uploads/livros/${req.file.filename}`;
+}
 
 // ======================
 // buscarInsightsVendas
@@ -42,15 +121,16 @@ async function buscarInsightsVendas() {
     const genero = pedido.livro.categoria || "Sem categoria";
 
     if (!vendasPorLivro[livroId]) {
-      vendasPorLivro[livroId] = {
-        id: pedido.livro.id,
-        titulo: pedido.livro.titulo,
-        autor: pedido.livro.autor,
-        categoria: pedido.livro.categoria,
-        precoCompra: pedido.livro.precoCompra,
-        precoAluguel: pedido.livro.precoAluguel,
-        quantidadeVendas: 0,
-      };
+   vendasPorLivro[livroId] = {
+  id: pedido.livro.id,
+  titulo: pedido.livro.titulo,
+  autor: pedido.livro.autor,
+  categoria: pedido.livro.categoria,
+  precoCompra: pedido.livro.precoCompra,
+  precoAluguel: pedido.livro.precoAluguel,
+  imagemUrl: pedido.livro.imagemUrl,
+  quantidadeVendas: 0,
+};
     }
 
     vendasPorLivro[livroId].quantidadeVendas += 1;
@@ -101,7 +181,7 @@ app.get("/public/home-insights", async (req, res) => {
 // ======================
 // MIDDLEWARE AUTH
 // ======================
-function autenticar(req, res, next) {
+async function autenticar(req, res, next) {
   const authHeader = req.headers.authorization;
 
   if (!authHeader) {
@@ -118,7 +198,36 @@ function autenticar(req, res, next) {
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
-    req.usuario = decoded;
+
+    const usuario = await prisma.usuario.findUnique({
+      where: {
+        id: Number(decoded.id),
+      },
+      select: {
+        id: true,
+        nome: true,
+        email: true,
+        role: true,
+        emailConfirmado: true,
+        bloqueado: true,
+      },
+    });
+
+    if (!usuario) {
+      return res.status(401).json({
+        erro: "Usuário do token não encontrado",
+      });
+    }
+
+    if (usuario.role !== "ADMIN" && !usuario.emailConfirmado) {
+      return res.status(403).json({
+        erro: "Confirme seu email antes de acessar sua conta.",
+        precisaConfirmarEmail: true,
+        email: usuario.email,
+      });
+    }
+
+    req.usuario = usuario;
     next();
   } catch (error) {
     return res.status(401).json({ erro: "Token inválido" });
@@ -126,6 +235,12 @@ function autenticar(req, res, next) {
 }
 
 function somenteAdmin(req, res, next) {
+  if (!req.usuario) {
+    return res.status(401).json({
+      erro: "Usuário não autenticado",
+    });
+  }
+
   if (req.usuario.role !== "ADMIN") {
     return res.status(403).json({
       erro: "Acesso permitido somente para administradores",
@@ -134,7 +249,6 @@ function somenteAdmin(req, res, next) {
 
   next();
 }
-
 // ======================
 // ADMIN PADRÃO
 // ======================
@@ -171,7 +285,7 @@ criarAdminPadrao();
 
 
 // ======================
-// EMAIL CONFIG
+// EMAIL CONFIG - GMAIL
 // ======================
 const transporter = nodemailer.createTransport({
   service: "gmail",
@@ -180,6 +294,131 @@ const transporter = nodemailer.createTransport({
     pass: process.env.EMAIL_PASS,
   },
 });
+
+// ======================
+// EMAIL - CONFIRMAÇÃO DE CADASTRO
+// ======================
+function gerarTokenConfirmacaoEmail() {
+  return crypto.randomBytes(32).toString("hex");
+}
+
+function gerarDataExpiracaoToken() {
+  const data = new Date();
+  data.setHours(data.getHours() + 24);
+  return data;
+}
+
+async function enviarEmailConfirmacaoCadastro(usuario, token) {
+  const linkConfirmacao = `${BACKEND_URL}/confirmar-email/${token}`;
+
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+    throw new Error("EMAIL_USER ou EMAIL_PASS não configurados no .env");
+  }
+
+  await transporter.sendMail({
+    from: `"BiblioConnect" <${process.env.EMAIL_USER}>`,
+    to: usuario.email,
+    subject: "Confirme seu email - BiblioConnect",
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 620px; margin: 0 auto; padding: 24px; background: #f7f7f7;">
+        <div style="background: #ffffff; border-radius: 16px; padding: 28px; border: 1px solid #e5e7eb;">
+          <h2 style="color: #1E3A5F; margin-top: 0;">Confirme seu email</h2>
+
+          <p style="color: #374151; font-size: 15px;">
+            Olá, <strong>${usuario.nome}</strong>.
+          </p>
+
+          <p style="color: #374151; font-size: 15px;">
+            Seu cadastro no <strong>BiblioConnect</strong> foi criado com sucesso.
+            Para liberar o acesso à sua conta, confirme seu email clicando no botão abaixo.
+          </p>
+
+          <a
+            href="${linkConfirmacao}"
+            style="display: inline-block; margin-top: 18px; background: #E67E00; color: #ffffff; text-decoration: none; padding: 13px 20px; border-radius: 10px; font-weight: bold;"
+          >
+            Confirmar minha conta
+          </a>
+
+          <p style="color: #6b7280; font-size: 13px; margin-top: 24px;">
+            Este link expira em 24 horas.
+          </p>
+
+          <p style="color: #6b7280; font-size: 13px;">
+            Se o botão não funcionar, copie e cole este link no navegador:
+          </p>
+
+          <p style="word-break: break-all; color: #1E3A5F; font-size: 13px;">
+            ${linkConfirmacao}
+          </p>
+        </div>
+      </div>
+    `,
+  });
+}
+
+
+// ======================
+// EMAIL - REDEFINIÇÃO DE SENHA
+// ======================
+function gerarTokenResetSenha() {
+  return crypto.randomBytes(32).toString("hex");
+}
+
+function gerarDataExpiracaoResetSenha() {
+  const data = new Date();
+  data.setMinutes(data.getMinutes() + 30);
+  return data;
+}
+
+async function enviarEmailResetSenha(usuario, token) {
+  const linkReset = `${FRONTEND_URL}/redefinir-senha/${token}`;
+
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+    throw new Error("EMAIL_USER ou EMAIL_PASS não configurados no .env");
+  }
+
+  await transporter.sendMail({
+    from: `"BiblioConnect" <${process.env.EMAIL_USER}>`,
+    to: usuario.email,
+    subject: "Redefinição de senha - BiblioConnect",
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 620px; margin: 0 auto; padding: 24px; background: #f7f7f7;">
+        <div style="background: #ffffff; border-radius: 16px; padding: 28px; border: 1px solid #e5e7eb;">
+          <h2 style="color: #1E3A5F; margin-top: 0;">Redefinir senha</h2>
+
+          <p style="color: #374151; font-size: 15px;">
+            Olá, <strong>${usuario.nome}</strong>.
+          </p>
+
+          <p style="color: #374151; font-size: 15px;">
+            Recebemos uma solicitação para redefinir a senha da sua conta no <strong>BiblioConnect</strong>.
+          </p>
+
+          <a
+            href="${linkReset}"
+            style="display: inline-block; margin-top: 18px; background: #E67E00; color: #ffffff; text-decoration: none; padding: 13px 20px; border-radius: 10px; font-weight: bold;"
+          >
+            Redefinir minha senha
+          </a>
+
+          <p style="color: #6b7280; font-size: 13px; margin-top: 24px;">
+            Este link expira em 30 minutos.
+          </p>
+
+          <p style="color: #6b7280; font-size: 13px;">
+            Se você não solicitou essa alteração, ignore este email.
+          </p>
+
+          <p style="word-break: break-all; color: #1E3A5F; font-size: 13px;">
+            ${linkReset}
+          </p>
+        </div>
+      </div>
+    `,
+  });
+}
+
 
 // ======================
 // FUNÇÕES AUXILIARES
@@ -257,7 +496,20 @@ app.get("/", (req, res) => {
 // ======================
 app.post("/usuarios", async (req, res) => {
   try {
-    const { nome, email, senha, telefone, endereco } = req.body;
+    const {
+      nome,
+      email,
+      senha,
+      telefone,
+      cep,
+      rua,
+      bairro,
+      cidade,
+      estado,
+      numero,
+      complemento,
+      pontoReferencia,
+    } = req.body;
 
     if (!nome || !email || !senha) {
       return res.status(400).json({
@@ -265,42 +517,102 @@ app.post("/usuarios", async (req, res) => {
       });
     }
 
+    if (!cep || !rua || !bairro || !cidade || !estado || !numero) {
+      return res.status(400).json({
+        erro: "CEP, rua, bairro, cidade, estado e número são obrigatórios",
+      });
+    }
+
+    const emailNormalizado = String(email).trim().toLowerCase();
+
     const existe = await prisma.usuario.findUnique({
-      where: { email },
+      where: { email: emailNormalizado },
     });
 
     if (existe) {
       return res.status(400).json({ erro: "Email já cadastrado" });
     }
 
-    const senhaCriptografada = await bcrypt.hash(senha, 10);
+    const enderecoCompleto = [
+      rua,
+      numero ? `nº ${numero}` : "",
+      bairro,
+      cidade,
+      estado,
+      cep ? `CEP: ${cep}` : "",
+      complemento ? `Complemento: ${complemento}` : "",
+      pontoReferencia ? `Referência: ${pontoReferencia}` : "",
+    ]
+      .filter(Boolean)
+      .join(", ");
 
-    const usuario = await prisma.usuario.create({
+    const senhaCriptografada = await bcrypt.hash(senha, 10);
+    const tokenConfirmacaoEmail = gerarTokenConfirmacaoEmail();
+    const tokenConfirmacaoExpira = gerarDataExpiracaoToken();
+
+    const usuarioCriado = await prisma.usuario.create({
       data: {
         nome,
-        email,
+        email: emailNormalizado,
         senha: senhaCriptografada,
         telefone,
-        endereco,
+
+        endereco: enderecoCompleto,
+        cep,
+        rua,
+        bairro,
+        cidade,
+        estado,
+        numero,
+        complemento,
+        pontoReferencia,
+
         role: "CLIENTE",
         emailConfirmado: false,
+        tokenConfirmacaoEmail,
+        tokenConfirmacaoExpira,
       },
       select: {
         id: true,
         nome: true,
         email: true,
         telefone: true,
+
         endereco: true,
+        cep: true,
+        rua: true,
+        bairro: true,
+        cidade: true,
+        estado: true,
+        numero: true,
+        complemento: true,
+        pontoReferencia: true,
+
         role: true,
         emailConfirmado: true,
       },
     });
 
-    await enviarEmailCadastro(usuario.email, usuario.nome);
+    try {
+      await enviarEmailConfirmacaoCadastro(
+        usuarioCriado,
+        tokenConfirmacaoEmail
+      );
+    } catch (emailError) {
+      console.error("Erro ao enviar email de confirmação:", emailError);
+
+      return res.status(201).json({
+        mensagem:
+          "Usuário cadastrado, mas o email de confirmação não foi enviado. Verifique a configuração do EMAIL_USER e EMAIL_PASS.",
+        usuario: usuarioCriado,
+        avisoEmail: emailError.message,
+      });
+    }
 
     res.status(201).json({
-      mensagem: "Usuário cadastrado com sucesso. Verifique seu email.",
-      usuario,
+      mensagem:
+        "Usuário cadastrado com sucesso. Verifique seu email para confirmar a conta.",
+      usuario: usuarioCriado,
     });
   } catch (error) {
     console.error("Erro ao cadastrar usuário:", error);
@@ -311,6 +623,281 @@ app.post("/usuarios", async (req, res) => {
     });
   }
 });
+
+// ======================
+// CONFIRMAR EMAIL
+// ======================
+app.get("/confirmar-email/:token", async (req, res) => {
+  try {
+    const { token } = req.params;
+
+    const usuario = await prisma.usuario.findFirst({
+      where: {
+        tokenConfirmacaoEmail: token,
+      },
+    });
+
+    if (!usuario) {
+      return res.status(400).send(`
+        <html>
+          <body style="font-family: Arial; padding: 40px;">
+            <h2>Link inválido</h2>
+            <p>Este link de confirmação não existe ou já foi utilizado.</p>
+            <a href="${FRONTEND_URL}/login">Voltar para o login</a>
+          </body>
+        </html>
+      `);
+    }
+
+    if (
+      usuario.tokenConfirmacaoExpira &&
+      new Date(usuario.tokenConfirmacaoExpira) < new Date()
+    ) {
+      return res.status(400).send(`
+        <html>
+          <body style="font-family: Arial; padding: 40px;">
+            <h2>Link expirado</h2>
+            <p>Este link de confirmação expirou. Solicite um novo link pela tela de login.</p>
+            <a href="${FRONTEND_URL}/login">Voltar para o login</a>
+          </body>
+        </html>
+      `);
+    }
+
+    await prisma.usuario.update({
+      where: {
+        id: usuario.id,
+      },
+      data: {
+        emailConfirmado: true,
+        tokenConfirmacaoEmail: null,
+        tokenConfirmacaoExpira: null,
+      },
+    });
+
+    res.send(`
+      <html>
+        <head>
+          <meta http-equiv="refresh" content="3;url=${FRONTEND_URL}/login" />
+        </head>
+
+        <body style="font-family: Arial; padding: 40px; background: #f8fafc;">
+          <div style="max-width: 560px; margin: 0 auto; background: white; padding: 32px; border-radius: 16px; border: 1px solid #e5e7eb;">
+            <h2 style="color: #15803d;">Email confirmado com sucesso</h2>
+            <p>Sua conta foi ativada. Você já pode fazer login no BiblioConnect.</p>
+            <p>Você será redirecionado em alguns segundos.</p>
+            <a href="${FRONTEND_URL}/login" style="color: #E67E00; font-weight: bold;">Ir para o login</a>
+          </div>
+        </body>
+      </html>
+    `);
+  } catch (error) {
+    console.error("Erro ao confirmar email:", error);
+
+    res.status(500).send(`
+      <html>
+        <body style="font-family: Arial; padding: 40px;">
+          <h2>Erro ao confirmar email</h2>
+          <p>Ocorreu um erro interno ao confirmar sua conta.</p>
+          <a href="${FRONTEND_URL}/login">Voltar para o login</a>
+        </body>
+      </html>
+    `);
+  }
+});
+
+
+// ======================
+// ESQUECI MINHA SENHA
+// ======================
+app.post("/esqueci-senha", async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        erro: "Email é obrigatório",
+      });
+    }
+
+    const emailNormalizado = String(email).trim().toLowerCase();
+
+    const usuario = await prisma.usuario.findUnique({
+      where: {
+        email: emailNormalizado,
+      },
+    });
+
+    // Segurança: não revela se o email existe ou não.
+    if (!usuario) {
+      return res.json({
+        mensagem:
+          "Se este email estiver cadastrado, enviaremos um link de redefinição.",
+      });
+    }
+
+    const tokenResetSenha = gerarTokenResetSenha();
+    const tokenResetSenhaExpira = gerarDataExpiracaoResetSenha();
+
+    const usuarioAtualizado = await prisma.usuario.update({
+      where: {
+        id: usuario.id,
+      },
+      data: {
+        tokenResetSenha,
+        tokenResetSenhaExpira,
+      },
+      select: {
+        id: true,
+        nome: true,
+        email: true,
+      },
+    });
+
+    await enviarEmailResetSenha(usuarioAtualizado, tokenResetSenha);
+
+    res.json({
+      mensagem:
+        "Se este email estiver cadastrado, enviaremos um link de redefinição.",
+    });
+  } catch (error) {
+    console.error("Erro ao solicitar redefinição de senha:", error);
+
+    res.status(500).json({
+      erro: "Erro ao solicitar redefinição de senha",
+      detalhe: error.message,
+    });
+  }
+});
+
+// ======================
+// REDEFINIR SENHA
+// ======================
+app.patch("/redefinir-senha/:token", async (req, res) => {
+  try {
+    const { token } = req.params;
+    const { novaSenha } = req.body;
+
+    if (!novaSenha || String(novaSenha).length < 6) {
+      return res.status(400).json({
+        erro: "A nova senha deve ter pelo menos 6 caracteres.",
+      });
+    }
+
+    const usuario = await prisma.usuario.findFirst({
+      where: {
+        tokenResetSenha: token,
+      },
+    });
+
+    if (!usuario) {
+      return res.status(400).json({
+        erro: "Link inválido ou já utilizado.",
+      });
+    }
+
+    if (
+      usuario.tokenResetSenhaExpira &&
+      new Date(usuario.tokenResetSenhaExpira) < new Date()
+    ) {
+      return res.status(400).json({
+        erro: "Link expirado. Solicite uma nova redefinição de senha.",
+      });
+    }
+
+    const senhaCriptografada = await bcrypt.hash(novaSenha, 10);
+
+    await prisma.usuario.update({
+      where: {
+        id: usuario.id,
+      },
+      data: {
+        senha: senhaCriptografada,
+        tokenResetSenha: null,
+        tokenResetSenhaExpira: null,
+      },
+    });
+
+    res.json({
+      mensagem: "Senha redefinida com sucesso. Faça login novamente.",
+    });
+  } catch (error) {
+    console.error("Erro ao redefinir senha:", error);
+
+    res.status(500).json({
+      erro: "Erro ao redefinir senha",
+      detalhe: error.message,
+    });
+  }
+});
+
+
+// ======================
+// REENVIAR CONFIRMAÇÃO DE EMAIL
+// ======================
+app.post("/reenviar-confirmacao", async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        erro: "Email é obrigatório",
+      });
+    }
+
+    const emailNormalizado = String(email).trim().toLowerCase();
+
+    const usuario = await prisma.usuario.findUnique({
+      where: {
+        email: emailNormalizado,
+      },
+    });
+
+    if (!usuario) {
+      return res.status(404).json({
+        erro: "Usuário não encontrado",
+      });
+    }
+
+    if (usuario.emailConfirmado) {
+      return res.status(400).json({
+        erro: "Este email já foi confirmado.",
+      });
+    }
+
+    const novoToken = gerarTokenConfirmacaoEmail();
+    const novaExpiracao = gerarDataExpiracaoToken();
+
+    const usuarioAtualizado = await prisma.usuario.update({
+      where: {
+        id: usuario.id,
+      },
+      data: {
+        tokenConfirmacaoEmail: novoToken,
+        tokenConfirmacaoExpira: novaExpiracao,
+      },
+      select: {
+        id: true,
+        nome: true,
+        email: true,
+      },
+    });
+
+    await enviarEmailConfirmacaoCadastro(usuarioAtualizado, novoToken);
+
+    res.json({
+      mensagem: "Novo email de confirmação enviado com sucesso.",
+    });
+  } catch (error) {
+    console.error("Erro ao reenviar confirmação:", error);
+
+    res.status(500).json({
+      erro: "Erro ao reenviar email de confirmação",
+      detalhe: error.message,
+    });
+  }
+});
+
 
 // ======================
 // LOGIN
@@ -325,8 +912,10 @@ app.post("/login", async (req, res) => {
       });
     }
 
+    const emailNormalizado = String(email).trim().toLowerCase();
+
     const usuario = await prisma.usuario.findUnique({
-      where: { email },
+      where: { email: emailNormalizado },
     });
 
     if (!usuario) {
@@ -337,6 +926,14 @@ app.post("/login", async (req, res) => {
 
     if (!senhaCorreta) {
       return res.status(401).json({ erro: "Senha incorreta" });
+    }
+
+    if (usuario.role !== "ADMIN" && !usuario.emailConfirmado) {
+      return res.status(403).json({
+        erro: "Confirme seu email antes de fazer login.",
+        precisaConfirmarEmail: true,
+        email: usuario.email,
+      });
     }
 
     const token = jwt.sign(
@@ -414,7 +1011,17 @@ app.get("/admin/usuarios", autenticar, somenteAdmin, async (req, res) => {
         nome: true,
         email: true,
         telefone: true,
+
         endereco: true,
+        cep: true,
+        rua: true,
+        bairro: true,
+        cidade: true,
+        estado: true,
+        numero: true,
+        complemento: true,
+        pontoReferencia: true,
+
         bloqueado: true,
         emailConfirmado: true,
         createdAt: true,
@@ -442,7 +1049,17 @@ app.get("/admin/usuarios", autenticar, somenteAdmin, async (req, res) => {
         nome: usuario.nome,
         email: usuario.email,
         telefone: usuario.telefone,
+
         endereco: usuario.endereco,
+        cep: usuario.cep,
+        rua: usuario.rua,
+        bairro: usuario.bairro,
+        cidade: usuario.cidade,
+        estado: usuario.estado,
+        numero: usuario.numero,
+        complemento: usuario.complemento,
+        pontoReferencia: usuario.pontoReferencia,
+
         bloqueado: usuario.bloqueado,
         emailConfirmado: usuario.emailConfirmado,
         createdAt: usuario.createdAt,
@@ -661,54 +1278,69 @@ app.get("/admin/atrasos", autenticar, somenteAdmin, async (req, res) => {
 // ======================
 // CRIAR LIVRO - SOMENTE ADMIN
 // ======================
-app.post("/livros", autenticar, somenteAdmin, async (req, res) => {
-  try {
-    const {
-      titulo,
-      autor,
-      redator,
-      ano,
-      categoria,
-      sinopse,
-      precoCompra,
-      precoAluguel,
-      diasInclusos,
-      precoDiaExtra,
-      estoque,
-      isDoado,
-      destaque,
-      disponivel,
-    } = req.body;
-
-    const livro = await prisma.livro.create({
-      data: {
+app.post(
+  "/livros",
+  autenticar,
+  somenteAdmin,
+  uploadLivro.single("imagem"),
+  async (req, res) => {
+    try {
+      const {
         titulo,
         autor,
         redator,
-        ano: Number(ano),
+        ano,
         categoria,
         sinopse,
-        precoCompra: Number(precoCompra),
-        precoAluguel: Number(precoAluguel),
-        diasInclusos: Number(diasInclusos),
-        precoDiaExtra: Number(precoDiaExtra),
-        estoque: Number(estoque),
-        isDoado: Boolean(isDoado),
-        destaque: Boolean(destaque),
-        disponivel: disponivel === undefined ? true : Boolean(disponivel),
-      },
-    });
+        precoCompra,
+        precoAluguel,
+        diasInclusos,
+        precoDiaExtra,
+        estoque,
+        isDoado,
+        destaque,
+        disponivel,
+      } = req.body;
 
-    res.status(201).json(livro);
-  } catch (error) {
-    console.error("Erro ao criar livro:", error);
+      if (!titulo || !autor || !categoria || !sinopse) {
+        return res.status(400).json({
+          erro: "Título, autor, categoria e sinopse são obrigatórios",
+        });
+      }
 
-    res.status(500).json({
-      erro: "Erro ao criar livro",
-      detalhe: error.message,
-    });
-  }
-});
+      const imagemUrl = montarImagemUrl(req);
+
+      const livro = await prisma.livro.create({
+        data: {
+          titulo,
+          autor,
+          redator,
+          ano: Number(ano),
+          categoria,
+          sinopse,
+          precoCompra: Number(precoCompra),
+          precoAluguel: Number(precoAluguel),
+          diasInclusos: Number(diasInclusos),
+          precoDiaExtra: Number(precoDiaExtra),
+          estoque: Number(estoque),
+          isDoado: converterBoolean(isDoado, false),
+          destaque: converterBoolean(destaque, false),
+          disponivel: converterBoolean(disponivel, true),
+          imagemUrl,
+        },
+      });
+
+      res.status(201).json(livro);
+    } catch (error) {
+      console.error("Erro ao criar livro:", error);
+
+      res.status(500).json({
+        erro: "Erro ao criar livro",
+        detalhe: error.message,
+      });
+    }
+  },
+);
 
 // ======================
 // LISTAR LIVROS
@@ -763,69 +1395,78 @@ app.get("/livros/:id", async (req, res) => {
 // ======================
 // EDITAR LIVRO - SOMENTE ADMIN
 // ======================
-app.put("/livros/:id", autenticar, somenteAdmin, async (req, res) => {
-  try {
-    const { id } = req.params;
+app.put(
+  "/livros/:id",
+  autenticar,
+  somenteAdmin,
+  uploadLivro.single("imagem"),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
 
-    const {
-      titulo,
-      autor,
-      redator,
-      ano,
-      categoria,
-      sinopse,
-      precoCompra,
-      precoAluguel,
-      diasInclusos,
-      precoDiaExtra,
-      estoque,
-      isDoado,
-      destaque,
-      disponivel,
-    } = req.body;
-
-    const livroExiste = await prisma.livro.findUnique({
-      where: {
-        id: Number(id),
-      },
-    });
-
-    if (!livroExiste) {
-      return res.status(404).json({ erro: "Livro não encontrado" });
-    }
-
-    const livro = await prisma.livro.update({
-      where: {
-        id: Number(id),
-      },
-      data: {
+      const {
         titulo,
         autor,
         redator,
-        ano: Number(ano),
+        ano,
         categoria,
         sinopse,
-        precoCompra: Number(precoCompra),
-        precoAluguel: Number(precoAluguel),
-        diasInclusos: Number(diasInclusos),
-        precoDiaExtra: Number(precoDiaExtra),
-        estoque: Number(estoque),
-        isDoado: Boolean(isDoado),
-        destaque: Boolean(destaque),
-        disponivel: Boolean(disponivel),
-      },
-    });
+        precoCompra,
+        precoAluguel,
+        diasInclusos,
+        precoDiaExtra,
+        estoque,
+        isDoado,
+        destaque,
+        disponivel,
+      } = req.body;
 
-    res.json(livro);
-  } catch (error) {
-    console.error("Erro ao editar livro:", error);
+      const livroExiste = await prisma.livro.findUnique({
+        where: {
+          id: Number(id),
+        },
+      });
 
-    res.status(500).json({
-      erro: "Erro ao editar livro",
-      detalhe: error.message,
-    });
-  }
-});
+      if (!livroExiste) {
+        return res.status(404).json({ erro: "Livro não encontrado" });
+      }
+
+      const novaImagemUrl = montarImagemUrl(req);
+
+      const livro = await prisma.livro.update({
+        where: {
+          id: Number(id),
+        },
+        data: {
+          titulo,
+          autor,
+          redator,
+          ano: Number(ano),
+          categoria,
+          sinopse,
+          precoCompra: Number(precoCompra),
+          precoAluguel: Number(precoAluguel),
+          diasInclusos: Number(diasInclusos),
+          precoDiaExtra: Number(precoDiaExtra),
+          estoque: Number(estoque),
+          isDoado: converterBoolean(isDoado, false),
+          destaque: converterBoolean(destaque, false),
+          disponivel: converterBoolean(disponivel, true),
+          imagemUrl: novaImagemUrl || livroExiste.imagemUrl,
+        },
+      });
+
+      res.json(livro);
+    } catch (error) {
+      console.error("Erro ao editar livro:", error);
+
+      res.status(500).json({
+        erro: "Erro ao editar livro",
+        detalhe: error.message,
+      });
+    }
+  },
+);
 
 // ======================
 // PAUSAR / ATIVAR LIVRO - SOMENTE ADMIN
@@ -1491,42 +2132,38 @@ app.get("/admin/dashboard", autenticar, somenteAdmin, async (req, res) => {
 // ======================
 async function enviarEmail(email, livro, pedido) {
   try {
+    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+      console.log("EMAIL_USER ou EMAIL_PASS não configurados. Email de pedido não enviado.");
+      return;
+    }
+
     await transporter.sendMail({
       from: `"BiblioConnect" <${process.env.EMAIL_USER}>`,
       to: email,
-      subject: "Confirmação de Pedido",
+      subject: "Confirmação de Pedido - BiblioConnect",
       html: `
-        <h2>Pedido confirmado</h2>
-        <p><b>Livro:</b> ${livro.titulo}</p>
-        <p><b>Tipo:</b> ${pedido.tipo}</p>
-        <p><b>Valor:</b> R$ ${pedido.valor}</p>
-        <p><b>Retirada até:</b> ${new Date(
-          pedido.retiradaLimite,
-        ).toLocaleDateString("pt-BR")}</p>
+        <div style="font-family: Arial, sans-serif; max-width: 620px; margin: 0 auto; padding: 24px; background: #f7f7f7;">
+          <div style="background: #ffffff; border-radius: 16px; padding: 28px; border: 1px solid #e5e7eb;">
+            <h2 style="color: #1E3A5F; margin-top: 0;">Pedido confirmado</h2>
+
+            <p style="color: #374151;"><strong>Livro:</strong> ${livro.titulo}</p>
+            <p style="color: #374151;"><strong>Tipo:</strong> ${pedido.tipo}</p>
+            <p style="color: #374151;"><strong>Valor:</strong> R$ ${Number(
+              pedido.valor || 0
+            ).toFixed(2)}</p>
+            <p style="color: #374151;"><strong>Retirada até:</strong> ${new Date(
+              pedido.retiradaLimite
+            ).toLocaleDateString("pt-BR")}</p>
+
+            <p style="color: #6b7280; font-size: 13px; margin-top: 20px;">
+              Acesse o BiblioConnect para acompanhar o status do pedido.
+            </p>
+          </div>
+        </div>
       `,
     });
   } catch (error) {
     console.log("Erro no email:", error.message);
-  }
-}
-
-// ======================
-// EMAIL CADASTRO
-// ======================
-async function enviarEmailCadastro(email, nome) {
-  try {
-    await transporter.sendMail({
-      from: `"BiblioConnect" <${process.env.EMAIL_USER}>`,
-      to: email,
-      subject: "Confirmação de cadastro - BiblioConnect",
-      html: `
-        <h2>Bem-vindo ao BiblioConnect, ${nome}!</h2>
-        <p>Seu cadastro foi realizado com sucesso.</p>
-        <p>Agora você já pode acessar a biblioteca online.</p>
-      `,
-    });
-  } catch (error) {
-    console.log("Erro no email de cadastro:", error.message);
   }
 }
 // ======================
@@ -1862,6 +2499,111 @@ app.patch("/pedidos/:id/simular-pagamento", autenticar, async (req, res) => {
     });
   }
 });
+
+
+// ======================
+// ADMIN - RESETAR SISTEMA
+// ======================
+app.post("/admin/resetar-sistema", autenticar, somenteAdmin, async (req, res) => {
+  try {
+    const { senhaAdmin, confirmacao } = req.body;
+
+    if (!senhaAdmin) {
+      return res.status(400).json({
+        erro: "Senha do administrador é obrigatória.",
+      });
+    }
+
+    if (confirmacao !== "RESETAR") {
+      return res.status(400).json({
+        erro: 'Digite exatamente "RESETAR" para confirmar a ação.',
+      });
+    }
+
+    const admin = await prisma.usuario.findUnique({
+      where: {
+        id: Number(req.usuario.id),
+      },
+    });
+
+    if (!admin || admin.role !== "ADMIN") {
+      return res.status(403).json({
+        erro: "Administrador inválido.",
+      });
+    }
+
+    const senhaCorreta = await bcrypt.compare(senhaAdmin, admin.senha);
+
+    if (!senhaCorreta) {
+      return res.status(401).json({
+        erro: "Senha do administrador incorreta.",
+      });
+    }
+
+    const resultado = await prisma.$transaction(async (tx) => {
+      const pedidosApagados = await tx.pedido.deleteMany({});
+
+      const livrosApagados = await tx.livro.deleteMany({});
+
+      const usuariosApagados = await tx.usuario.deleteMany({
+        where: {
+          role: "CLIENTE",
+        },
+      });
+
+      await tx.usuario.update({
+        where: {
+          id: admin.id,
+        },
+        data: {
+          emailConfirmado: true,
+          bloqueado: false,
+          tokenConfirmacaoEmail: null,
+          tokenConfirmacaoExpira: null,
+          tokenResetSenha: null,
+          tokenResetSenhaExpira: null,
+        },
+      });
+
+      return {
+        pedidosApagados: pedidosApagados.count,
+        livrosApagados: livrosApagados.count,
+        usuariosApagados: usuariosApagados.count,
+      };
+    });
+
+    try {
+      const pastaUploadsLivros = path.join(__dirname, "uploads", "livros");
+
+      if (fs.existsSync(pastaUploadsLivros)) {
+        const arquivos = fs.readdirSync(pastaUploadsLivros);
+
+        arquivos.forEach((arquivo) => {
+          const caminhoArquivo = path.join(pastaUploadsLivros, arquivo);
+
+          if (fs.existsSync(caminhoArquivo)) {
+            fs.unlinkSync(caminhoArquivo);
+          }
+        });
+      }
+    } catch (uploadError) {
+      console.log("Aviso: dados resetados, mas houve erro ao limpar uploads:", uploadError.message);
+    }
+
+    res.json({
+      mensagem: "Sistema resetado com sucesso.",
+      resultado,
+    });
+  } catch (error) {
+    console.error("Erro ao resetar sistema:", error);
+
+    res.status(500).json({
+      erro: "Erro ao resetar sistema",
+      detalhe: error.message,
+    });
+  }
+});
+
 
 // ======================
 // START SERVER

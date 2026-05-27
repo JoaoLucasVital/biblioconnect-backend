@@ -8,18 +8,34 @@ datasource db {
 }
 
 model Usuario {
-  id              Int      @id @default(autoincrement())
-  nome            String
-  email           String   @unique
-  senha           String
-  telefone        String?
-  endereco        String?
-  role            String   @default("CLIENTE")
-  emailConfirmado Boolean  @default(false)
-  bloqueado       Boolean  @default(false)
-  createdAt       DateTime @default(now())
+  id                     Int       @id @default(autoincrement())
+  nome                   String
+  email                  String    @unique
+  senha                  String
+  telefone               String?
 
-  pedidos         Pedido[]
+  endereco               String?
+  cep                    String?
+  rua                    String?
+  bairro                 String?
+  cidade                 String?
+  estado                 String?
+  numero                 String?
+  complemento            String?
+  pontoReferencia        String?
+
+  role                   String    @default("CLIENTE")
+  emailConfirmado        Boolean   @default(false)
+  tokenConfirmacaoEmail  String?   @unique
+  tokenConfirmacaoExpira DateTime?
+
+  tokenResetSenha        String?   @unique
+  tokenResetSenhaExpira  DateTime?
+
+  bloqueado              Boolean   @default(false)
+  createdAt              DateTime  @default(now())
+
+  pedidos Pedido[]
 }
 
 model Livro {
@@ -36,6 +52,8 @@ model Livro {
   precoDiaExtra   Float
   estoque         Int
   isDoado         Boolean  @default(false)
+
+  imagemUrl       String?
 
   destaque        Boolean  @default(false)
   disponivel      Boolean  @default(true)

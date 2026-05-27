@@ -40,6 +40,13 @@ function AdminDashboard() {
 
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState("");
+  const [mensagem, setMensagem] = useState("");
+
+  const [mostrarResetRestrito, setMostrarResetRestrito] = useState(false);
+  const [senhaAdmin, setSenhaAdmin] = useState("");
+  const [confirmacaoReset, setConfirmacaoReset] = useState("");
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [resetando, setResetando] = useState(false);
 
   async function carregarDashboard() {
     try {
@@ -70,6 +77,49 @@ function AdminDashboard() {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function resetarSistema() {
+    try {
+      setResetando(true);
+      setErro("");
+      setMensagem("");
+
+      const response = await api.post("/admin/resetar-sistema", {
+        senhaAdmin,
+        confirmacao: confirmacaoReset,
+      });
+
+      setMensagem(response.data?.mensagem || "Sistema resetado com sucesso.");
+      setShowResetConfirm(false);
+      setSenhaAdmin("");
+      setConfirmacaoReset("");
+      setMostrarResetRestrito(false);
+
+      await carregarDashboard();
+    } catch (error) {
+      setErro(error.response?.data?.erro || "Erro ao resetar sistema.");
+      setShowResetConfirm(false);
+    } finally {
+      setResetando(false);
+    }
+  }
+
+  function abrirConfirmacaoReset(event) {
+    event.preventDefault();
+
+    if (!senhaAdmin) {
+      setErro("Digite a senha do administrador para continuar.");
+      return;
+    }
+
+    if (confirmacaoReset !== "RESETAR") {
+      setErro('Digite exatamente "RESETAR" para liberar a ação.');
+      return;
+    }
+
+    setErro("");
+    setShowResetConfirm(true);
   }
 
   useEffect(() => {
@@ -151,12 +201,11 @@ function AdminDashboard() {
         </section>
 
         {erro && <p className="feedback-banner error">{erro}</p>}
+        {mensagem && <p className="feedback-banner success">{mensagem}</p>}
 
         <section className="admin-hot-summary">
           <div>
-            <span className="hot-label">
-              🔥 Livro mais vendido
-            </span>
+            <span className="hot-label">🔥 Livro mais vendido</span>
 
             <strong>
               {stats.livroMaisVendido
@@ -173,9 +222,7 @@ function AdminDashboard() {
           </div>
 
           <div>
-            <span className="hot-label">
-              🔥 Gênero mais vendido
-            </span>
+            <span className="hot-label">🔥 Gênero mais vendido</span>
 
             <strong>
               {stats.generoMaisVendido
@@ -289,7 +336,10 @@ function AdminDashboard() {
               <ResponsiveContainer width="100%" height={320}>
                 <BarChart data={barData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#d6dde7" />
-                  <XAxis dataKey="nome" tick={{ fill: "#5b6676", fontSize: 12 }} />
+                  <XAxis
+                    dataKey="nome"
+                    tick={{ fill: "#5b6676", fontSize: 12 }}
+                  />
                   <YAxis tick={{ fill: "#5b6676", fontSize: 12 }} />
                   <Tooltip />
                   <Bar dataKey="valor" fill="#1E3A5F" radius={[8, 8, 0, 0]} />
@@ -346,10 +396,17 @@ function AdminDashboard() {
                 <ResponsiveContainer width="100%" height={320}>
                   <BarChart data={livrosData}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#d6dde7" />
-                    <XAxis dataKey="nome" tick={{ fill: "#5b6676", fontSize: 12 }} />
+                    <XAxis
+                      dataKey="nome"
+                      tick={{ fill: "#5b6676", fontSize: 12 }}
+                    />
                     <YAxis tick={{ fill: "#5b6676", fontSize: 12 }} />
                     <Tooltip />
-                    <Bar dataKey="vendas" fill="#E67E00" radius={[8, 8, 0, 0]} />
+                    <Bar
+                      dataKey="vendas"
+                      fill="#E67E00"
+                      radius={[8, 8, 0, 0]}
+                    />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -374,10 +431,17 @@ function AdminDashboard() {
                 <ResponsiveContainer width="100%" height={320}>
                   <BarChart data={generosData}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#d6dde7" />
-                    <XAxis dataKey="nome" tick={{ fill: "#5b6676", fontSize: 12 }} />
+                    <XAxis
+                      dataKey="nome"
+                      tick={{ fill: "#5b6676", fontSize: 12 }}
+                    />
                     <YAxis tick={{ fill: "#5b6676", fontSize: 12 }} />
                     <Tooltip />
-                    <Bar dataKey="vendas" fill="#1E3A5F" radius={[8, 8, 0, 0]} />
+                    <Bar
+                      dataKey="vendas"
+                      fill="#1E3A5F"
+                      radius={[8, 8, 0, 0]}
+                    />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -389,7 +453,105 @@ function AdminDashboard() {
             )}
           </div>
         </section>
+
+        <section className="admin-reset-zone professional-card">
+          <div className="admin-reset-header">
+            <div>
+              <span className="section-kicker">Área restrita</span>
+              <h2>Resetar dados para apresentação</h2>
+              <p>
+                Esta opção apaga usuários clientes, livros, pedidos, vendas,
+                aluguéis, reservas, multas e capas cadastradas. O administrador
+                padrão será mantido.
+              </p>
+            </div>
+
+            <button
+              className="btn btn-dark"
+              onClick={() => setMostrarResetRestrito((prev) => !prev)}
+            >
+              {mostrarResetRestrito ? "Ocultar área" : "Abrir área restrita"}
+            </button>
+          </div>
+
+          {mostrarResetRestrito && (
+            <form className="admin-reset-form" onSubmit={abrirConfirmacaoReset}>
+              <div className="form-group">
+                <label>Senha do administrador</label>
+                <input
+                  type="password"
+                  placeholder="Digite a senha do admin"
+                  value={senhaAdmin}
+                  onChange={(event) => setSenhaAdmin(event.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="form-group">
+                <label>Confirmação textual</label>
+                <input
+                  type="text"
+                  placeholder='Digite exatamente "RESETAR"'
+                  value={confirmacaoReset}
+                  onChange={(event) =>
+                    setConfirmacaoReset(event.target.value)
+                  }
+                  required
+                />
+              </div>
+
+              <button className="btn btn-danger" disabled={resetando}>
+                Preparar reset
+              </button>
+            </form>
+          )}
+        </section>
       </div>
+
+      {showResetConfirm && (
+        <div className="popup-overlay final-modal-overlay">
+          <div className="popup-card final-modal-card">
+            <h2>Confirmar reset geral</h2>
+
+            <p>
+              Esta ação vai apagar os dados operacionais do sistema para deixar
+              o projeto pronto para uma nova apresentação.
+            </p>
+
+            <div className="popup-details">
+              <span>Todos os usuários clientes serão excluídos.</span>
+              <span>Todos os livros cadastrados serão excluídos.</span>
+              <span>Todos os pedidos, compras, reservas e aluguéis serão apagados.</span>
+              <span>Todos os valores, gráficos, multas e rankings serão zerados.</span>
+              <span>As capas enviadas dos livros serão removidas da pasta uploads.</span>
+              <span>O administrador padrão será mantido.</span>
+            </div>
+
+            <p className="danger-note">
+              Essa ação não pode ser desfeita. Use apenas antes da apresentação
+              ou quando quiser limpar completamente o ambiente.
+            </p>
+
+            <div className="popup-actions">
+              <button
+                className="btn btn-outline"
+                onClick={() => setShowResetConfirm(false)}
+                disabled={resetando}
+              >
+                Cancelar
+              </button>
+
+              <button
+                className="btn btn-danger"
+                onClick={resetarSistema}
+                disabled={resetando}
+              >
+                {resetando ? "Resetando..." : "Confirmar reset geral"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

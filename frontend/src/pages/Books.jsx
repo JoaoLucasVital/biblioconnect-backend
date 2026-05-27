@@ -3,6 +3,18 @@ import { useNavigate } from "react-router-dom";
 import api from "../api/api.js";
 import { useAuth } from "../context/AuthContext.jsx";
 
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
+
+function montarUrlImagem(imagemUrl) {
+  if (!imagemUrl) return "";
+
+  if (imagemUrl.startsWith("http://") || imagemUrl.startsWith("https://")) {
+    return imagemUrl;
+  }
+
+  return `${API_URL}${imagemUrl}`;
+}
+
 function formatarMoeda(valor) {
   return Number(valor || 0).toLocaleString("pt-BR", {
     style: "currency",
@@ -68,6 +80,31 @@ function calcularAluguel(livro, dias) {
     valorFinal,
     devolucaoPrevista: devolucao,
   };
+}
+
+function BookCover({ livro, variant = "catalog" }) {
+  const imagem = montarUrlImagem(livro.imagemUrl);
+
+  return (
+    <div className={`catalog-book-cover-v2 real-book-cover ${variant}`}>
+      {imagem ? (
+        <img
+          src={imagem}
+          alt={`Capa do livro ${livro.titulo}`}
+          loading="lazy"
+          onError={(event) => {
+            event.currentTarget.style.display = "none";
+            event.currentTarget.nextElementSibling?.classList.remove("hidden");
+          }}
+        />
+      ) : null}
+
+      <div className={imagem ? "book-cover-fallback hidden" : "book-cover-fallback"}>
+        <span>{livro.titulo?.slice(0, 2)?.toUpperCase()}</span>
+        <small>{livro.categoria}</small>
+      </div>
+    </div>
+  );
 }
 
 function Books() {
@@ -376,10 +413,7 @@ function Books() {
           <div className="catalog-grid-v2">
             {livrosVisiveis.map((livro) => (
               <article className="catalog-book-card-v2" key={livro.id}>
-                <div className="catalog-book-cover-v2">
-                  <span>{livro.titulo?.slice(0, 2)?.toUpperCase()}</span>
-                  <small>{livro.categoria}</small>
-                </div>
+                <BookCover livro={livro} variant="catalog" />
 
                 <div className="catalog-book-body-v2">
                   <div className="catalog-book-heading">
@@ -456,8 +490,8 @@ function Books() {
       </div>
 
       {livroCompra && (
-        <div className="popup-overlay">
-          <div className="popup-card">
+        <div className="popup-overlay final-modal-overlay">
+          <div className="popup-card final-modal-card">
             <h2>Confirmar compra</h2>
 
             <p>
@@ -465,11 +499,15 @@ function Books() {
               <strong>{livroCompra.titulo}</strong>.
             </p>
 
-            <div className="popup-details">
-              <span>Autor: {livroCompra.autor}</span>
-              <span>Categoria: {livroCompra.categoria}</span>
-              <span>Valor: {formatarMoeda(livroCompra.precoCompra)}</span>
-              <span>Retirada: até 7 dias após a compra</span>
+            <div className="popup-book-resume">
+              <BookCover livro={livroCompra} variant="modal" />
+
+              <div className="popup-details">
+                <span>Autor: {livroCompra.autor}</span>
+                <span>Categoria: {livroCompra.categoria}</span>
+                <span>Valor: {formatarMoeda(livroCompra.precoCompra)}</span>
+                <span>Retirada: até 7 dias após a compra</span>
+              </div>
             </div>
 
             <div className="popup-actions">
@@ -494,8 +532,8 @@ function Books() {
       )}
 
       {livroAluguel && (
-        <div className="popup-overlay">
-          <div className="popup-card popup-card-large">
+        <div className="popup-overlay final-modal-overlay">
+          <div className="popup-card popup-card-large final-modal-card">
             <h2>Confirmar aluguel</h2>
 
             <p>
@@ -503,35 +541,39 @@ function Books() {
               <strong>{livroAluguel.titulo}</strong>.
             </p>
 
-            <div className="reservation-info">
-              <div>
-                <span>Livro</span>
-                <strong>{livroAluguel.titulo}</strong>
-              </div>
+            <div className="popup-book-resume">
+              <BookCover livro={livroAluguel} variant="modal" />
 
-              <div>
-                <span>Estoque atual</span>
-                <strong>{livroAluguel.estoque}</strong>
-              </div>
+              <div className="reservation-info">
+                <div>
+                  <span>Livro</span>
+                  <strong>{livroAluguel.titulo}</strong>
+                </div>
 
-              <div>
-                <span>Valor base</span>
-                <strong>{formatarMoeda(livroAluguel.precoAluguel)}</strong>
-              </div>
+                <div>
+                  <span>Estoque atual</span>
+                  <strong>{livroAluguel.estoque}</strong>
+                </div>
 
-              <div>
-                <span>Dias inclusos</span>
-                <strong>{livroAluguel.diasInclusos} dias</strong>
-              </div>
+                <div>
+                  <span>Valor base</span>
+                  <strong>{formatarMoeda(livroAluguel.precoAluguel)}</strong>
+                </div>
 
-              <div>
-                <span>Dia extra</span>
-                <strong>{formatarMoeda(livroAluguel.precoDiaExtra)}</strong>
-              </div>
+                <div>
+                  <span>Dias inclusos</span>
+                  <strong>{livroAluguel.diasInclusos} dias</strong>
+                </div>
 
-              <div>
-                <span>Dias extras</span>
-                <strong>{aluguelCalculado.diasExtras}</strong>
+                <div>
+                  <span>Dia extra</span>
+                  <strong>{formatarMoeda(livroAluguel.precoDiaExtra)}</strong>
+                </div>
+
+                <div>
+                  <span>Dias extras</span>
+                  <strong>{aluguelCalculado.diasExtras}</strong>
+                </div>
               </div>
             </div>
 
@@ -581,8 +623,8 @@ function Books() {
       )}
 
       {livroReserva && (
-        <div className="popup-overlay">
-          <div className="popup-card popup-card-large">
+        <div className="popup-overlay final-modal-overlay">
+          <div className="popup-card popup-card-large final-modal-card">
             <h2>Confirmar reserva</h2>
 
             <p>
@@ -590,25 +632,29 @@ function Books() {
               <strong>{livroReserva.titulo}</strong>.
             </p>
 
-            <div className="reservation-info">
-              <div>
-                <span>Livro</span>
-                <strong>{livroReserva.titulo}</strong>
-              </div>
+            <div className="popup-book-resume">
+              <BookCover livro={livroReserva} variant="modal" />
 
-              <div>
-                <span>Estoque atual</span>
-                <strong>{livroReserva.estoque}</strong>
-              </div>
+              <div className="reservation-info">
+                <div>
+                  <span>Livro</span>
+                  <strong>{livroReserva.titulo}</strong>
+                </div>
 
-              <div>
-                <span>Prazo sem multa</span>
-                <strong>Até 7 dias</strong>
-              </div>
+                <div>
+                  <span>Estoque atual</span>
+                  <strong>{livroReserva.estoque}</strong>
+                </div>
 
-              <div>
-                <span>Multa por dia após prazo</span>
-                <strong>R$ 2,00</strong>
+                <div>
+                  <span>Prazo sem multa</span>
+                  <strong>Até 7 dias</strong>
+                </div>
+
+                <div>
+                  <span>Multa por dia após prazo</span>
+                  <strong>R$ 2,00</strong>
+                </div>
               </div>
             </div>
 

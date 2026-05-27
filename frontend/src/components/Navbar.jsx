@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import ThemeToggle from "./ThemeToggle.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
@@ -6,6 +7,10 @@ import BrandLogo from "./BrandLogo.jsx";
 function Navbar() {
   const { usuario, isAuthenticated, isAdmin, logout, loadingAuth } = useAuth();
   const navigate = useNavigate();
+
+  const [navbarHidden, setNavbarHidden] = useState(false);
+  const [navbarCompact, setNavbarCompact] = useState(false);
+  const lastScrollY = useRef(0);
 
   function handleLogout() {
     logout();
@@ -16,8 +21,46 @@ function Navbar() {
     return isActive ? "nav-link active" : "nav-link";
   }
 
+  useEffect(() => {
+    function handleScroll() {
+      const currentScrollY = window.scrollY;
+
+      setNavbarCompact(currentScrollY > 40);
+
+      if (currentScrollY < 90) {
+        setNavbarHidden(false);
+        lastScrollY.current = currentScrollY;
+        return;
+      }
+
+      if (currentScrollY > lastScrollY.current + 8) {
+        setNavbarHidden(true);
+      }
+
+      if (currentScrollY < lastScrollY.current - 8) {
+        setNavbarHidden(false);
+      }
+
+      lastScrollY.current = currentScrollY;
+    }
+
+    window.addEventListener("scroll", handleScroll, { passive: true });
+
+    return () => {
+      window.removeEventListener("scroll", handleScroll);
+    };
+  }, []);
+
   return (
-    <header className="navbar">
+    <header
+      className={[
+        "navbar",
+        navbarHidden ? "navbar-hidden" : "",
+        navbarCompact ? "navbar-compact" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
       <div className="container navbar-shell">
         <div className="navbar-left">
           <Link to="/" className="brand">

@@ -13,6 +13,22 @@ function formatarData(data) {
   return new Date(data).toLocaleDateString("pt-BR");
 }
 
+function montarEnderecoResumo(usuario) {
+  const partes = [
+    usuario.rua,
+    usuario.numero ? `nº ${usuario.numero}` : "",
+    usuario.bairro,
+    usuario.cidade,
+    usuario.estado,
+  ].filter(Boolean);
+
+  if (partes.length > 0) {
+    return partes.join(", ");
+  }
+
+  return usuario.endereco || "Não informado";
+}
+
 function AdminUsers() {
   const [usuarios, setUsuarios] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -111,6 +127,14 @@ function AdminUsers() {
         usuario.email,
         usuario.telefone,
         usuario.endereco,
+        usuario.cep,
+        usuario.rua,
+        usuario.bairro,
+        usuario.cidade,
+        usuario.estado,
+        usuario.numero,
+        usuario.complemento,
+        usuario.pontoReferencia,
       ]
         .filter(Boolean)
         .join(" ")
@@ -122,7 +146,9 @@ function AdminUsers() {
         filtroStatus === "todos" ||
         (filtroStatus === "ativos" && !usuario.bloqueado) ||
         (filtroStatus === "congelados" && usuario.bloqueado) ||
-        (filtroStatus === "comMulta" && Number(usuario.multaTotal || 0) > 0);
+        (filtroStatus === "comMulta" && Number(usuario.multaTotal || 0) > 0) ||
+        (filtroStatus === "emailConfirmado" && usuario.emailConfirmado) ||
+        (filtroStatus === "emailPendente" && !usuario.emailConfirmado);
 
       return buscaValida && statusValido;
     });
@@ -155,7 +181,8 @@ function AdminUsers() {
         <h1 className="page-title">Usuários Cadastrados</h1>
 
         <p className="page-subtitle">
-          Visualize clientes, pendências, dados de contato e controle de congelamento.
+          Visualize clientes, endereço completo, pendências, dados de contato e
+          controle de congelamento.
         </p>
 
         {feedback.text && (
@@ -166,7 +193,10 @@ function AdminUsers() {
           <div className="users-filter-top">
             <div>
               <h2>Filtros de usuários</h2>
-              <p>Busque clientes por dados pessoais ou status operacional.</p>
+              <p>
+                Busque clientes por dados pessoais, endereço, CEP ou status
+                operacional.
+              </p>
             </div>
 
             <button className="btn btn-outline" onClick={limparFiltros}>
@@ -181,7 +211,7 @@ function AdminUsers() {
                 type="text"
                 value={busca}
                 onChange={(event) => setBusca(event.target.value)}
-                placeholder="Nome, email, telefone ou endereço"
+                placeholder="Nome, email, telefone, CEP, rua, bairro ou cidade"
               />
             </div>
 
@@ -195,6 +225,8 @@ function AdminUsers() {
                 <option value="ativos">Ativos</option>
                 <option value="congelados">Congelados</option>
                 <option value="comMulta">Com multa</option>
+                <option value="emailConfirmado">Email confirmado</option>
+                <option value="emailPendente">Email pendente</option>
               </select>
             </div>
           </div>
@@ -235,7 +267,9 @@ function AdminUsers() {
         {usuariosFiltrados.length === 0 ? (
           <div className="empty-state">
             <h2>Nenhum usuário encontrado</h2>
-            <p>Ajuste os filtros ou aguarde clientes criarem conta na plataforma.</p>
+            <p>
+              Ajuste os filtros ou aguarde clientes criarem conta na plataforma.
+            </p>
           </div>
         ) : (
           <div className="admin-users-grid">
@@ -243,8 +277,8 @@ function AdminUsers() {
               <article
                 className={
                   usuario.bloqueado
-                    ? "admin-user-card user-blocked"
-                    : "admin-user-card"
+                    ? "admin-user-card user-blocked enhanced-user-card"
+                    : "admin-user-card enhanced-user-card"
                 }
                 key={usuario.id}
               >
@@ -276,11 +310,6 @@ function AdminUsers() {
                   </div>
 
                   <div>
-                    <span>Endereço</span>
-                    <strong>{usuario.endereco || "Não informado"}</strong>
-                  </div>
-
-                  <div>
                     <span>Cadastro</span>
                     <strong>{formatarData(usuario.createdAt)}</strong>
                   </div>
@@ -299,11 +328,64 @@ function AdminUsers() {
                     <span>Email confirmado</span>
                     <strong>{usuario.emailConfirmado ? "Sim" : "Não"}</strong>
                   </div>
+
+                  <div>
+                    <span>CEP</span>
+                    <strong>{usuario.cep || "Não informado"}</strong>
+                  </div>
+                </div>
+
+                <div className="user-address-box">
+                  <div className="user-address-header">
+                    <span>Endereço completo</span>
+                    <strong>{montarEnderecoResumo(usuario)}</strong>
+                  </div>
+
+                  <div className="user-address-grid">
+                    <div>
+                      <span>Rua / Avenida</span>
+                      <strong>{usuario.rua || "Não informado"}</strong>
+                    </div>
+
+                    <div>
+                      <span>Número</span>
+                      <strong>{usuario.numero || "Não informado"}</strong>
+                    </div>
+
+                    <div>
+                      <span>Bairro</span>
+                      <strong>{usuario.bairro || "Não informado"}</strong>
+                    </div>
+
+                    <div>
+                      <span>Cidade</span>
+                      <strong>{usuario.cidade || "Não informado"}</strong>
+                    </div>
+
+                    <div>
+                      <span>Estado</span>
+                      <strong>{usuario.estado || "Não informado"}</strong>
+                    </div>
+
+                    <div>
+                      <span>Complemento</span>
+                      <strong>{usuario.complemento || "Não informado"}</strong>
+                    </div>
+
+                    <div className="address-reference">
+                      <span>Ponto de referência</span>
+                      <strong>
+                        {usuario.pontoReferencia || "Não informado"}
+                      </strong>
+                    </div>
+                  </div>
                 </div>
 
                 <div className="admin-user-actions">
                   <button
-                    className={usuario.bloqueado ? "btn btn-primary" : "btn btn-dark"}
+                    className={
+                      usuario.bloqueado ? "btn btn-primary" : "btn btn-dark"
+                    }
                     onClick={() => abrirConfirmacao(usuario, "bloquear")}
                   >
                     {usuario.bloqueado ? "Descongelar" : "Congelar"}
@@ -323,8 +405,8 @@ function AdminUsers() {
       </div>
 
       {usuarioAcao && (
-        <div className="popup-overlay">
-          <div className="popup-card">
+        <div className="popup-overlay final-modal-overlay">
+          <div className="popup-card final-modal-card">
             <h2>
               {tipoAcao === "remover"
                 ? "Remover usuário"
@@ -344,6 +426,8 @@ function AdminUsers() {
             <div className="popup-details">
               <span>Nome: {usuarioAcao.nome}</span>
               <span>Email: {usuarioAcao.email}</span>
+              <span>Telefone: {usuarioAcao.telefone || "Não informado"}</span>
+              <span>Endereço: {montarEnderecoResumo(usuarioAcao)}</span>
               <span>Multa total: {formatarMoeda(usuarioAcao.multaTotal)}</span>
             </div>
 
@@ -357,7 +441,9 @@ function AdminUsers() {
               </button>
 
               <button
-                className={tipoAcao === "remover" ? "btn btn-danger" : "btn btn-primary"}
+                className={
+                  tipoAcao === "remover" ? "btn btn-danger" : "btn btn-primary"
+                }
                 onClick={confirmarAcao}
                 disabled={processando}
               >

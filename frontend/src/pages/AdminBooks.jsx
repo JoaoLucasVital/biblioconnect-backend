@@ -2,11 +2,53 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import api from "../api/api.js";
 
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
+
+function montarUrlImagem(imagemUrl) {
+  if (!imagemUrl) return "";
+
+  if (imagemUrl.startsWith("http://") || imagemUrl.startsWith("https://")) {
+    return imagemUrl;
+  }
+
+  return `${API_URL}${imagemUrl}`;
+}
+
 function formatarMoeda(valor) {
   return Number(valor || 0).toLocaleString("pt-BR", {
     style: "currency",
     currency: "BRL",
   });
+}
+
+function AdminBookCover({ livro }) {
+  const imagem = montarUrlImagem(livro.imagemUrl);
+
+  return (
+    <div className="admin-book-cover-thumb">
+      {imagem ? (
+        <img
+          src={imagem}
+          alt={`Capa do livro ${livro.titulo}`}
+          loading="lazy"
+          onError={(event) => {
+            event.currentTarget.style.display = "none";
+            event.currentTarget.nextElementSibling?.classList.remove("hidden");
+          }}
+        />
+      ) : null}
+
+      <div
+        className={
+          imagem
+            ? "admin-book-cover-fallback hidden"
+            : "admin-book-cover-fallback"
+        }
+      >
+        {livro.titulo?.slice(0, 2)?.toUpperCase()}
+      </div>
+    </div>
+  );
 }
 
 function AdminBooks() {
@@ -15,6 +57,9 @@ function AdminBooks() {
   const [erro, setErro] = useState("");
   const [mensagem, setMensagem] = useState("");
 
+  const [livroParaExcluir, setLivroParaExcluir] = useState(null);
+  const [excluindo, setExcluindo] = useState(false);
+
   async function carregarLivros() {
     try {
       setLoading(true);
@@ -22,7 +67,7 @@ function AdminBooks() {
 
       const response = await api.get("/livros");
 
-      setLivros(response.data);
+      setLivros(Array.isArray(response.data) ? response.data : []);
     } catch (error) {
       setErro("Erro ao carregar livros.");
     } finally {
@@ -75,23 +120,23 @@ function AdminBooks() {
     }
   }
 
-  async function excluirLivro(livro) {
-    const confirmar = window.confirm(
-      `Tem certeza que deseja excluir o livro "${livro.titulo}"?`
-    );
-
-    if (!confirmar) return;
+  async function confirmarExclusao() {
+    if (!livroParaExcluir) return;
 
     try {
+      setExcluindo(true);
       setMensagem("");
       setErro("");
 
-      await api.delete(`/livros/${livro.id}`);
+      await api.delete(`/livros/${livroParaExcluir.id}`);
 
       setMensagem("Livro excluído com sucesso.");
+      setLivroParaExcluir(null);
       carregarLivros();
     } catch (error) {
       setErro(error.response?.data?.erro || "Erro ao excluir livro.");
+    } finally {
+      setExcluindo(false);
     }
   }
 
@@ -136,9 +181,9 @@ function AdminBooks() {
         ) : (
           <div className="admin-books-list">
             {livros.map((livro) => (
-              <div className="admin-book-card" key={livro.id}>
+              <div className="admin-book-card admin-book-card-with-cover" key={livro.id}>
                 <div className="admin-book-main">
-                  <div className="admin-book-icon">📚</div>
+                  <AdminBookCover livro={livro} />
 
                   <div>
                     <div className="book-title-row">
@@ -160,6 +205,16 @@ function AdminBooks() {
                       {formatarMoeda(livro.precoCompra)} • Aluguel:{" "}
                       {formatarMoeda(livro.precoAluguel)}
                     </small>
+
+                    {livro.imagemUrl ? (
+                      <span className="admin-image-status ok">
+                        Imagem cadastrada
+                      </span>
+                    ) : (
+                      <span className="admin-image-status warning">
+                        Sem imagem de capa
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -187,7 +242,7 @@ function AdminBooks() {
 
                   <button
                     className="btn btn-danger"
-                    onClick={() => excluirLivro(livro)}
+                    onClick={() => setLivroParaExcluir(livro)}
                   >
                     Excluir
                   </button>
@@ -197,6 +252,55 @@ function AdminBooks() {
           </div>
         )}
       </div>
+
+      {livroParaExcluir && (
+        <div className="popup-overlay final-modal-overlay">
+          <div className="popup-card final-modal-card">
+            <h2>Excluir livro</h2>
+
+            <p>
+              Tem certeza que deseja excluir{" "}
+              <strong>{livroParaExcluir.titulo}</strong>?
+            </p>
+
+            <div className="popup-book-resume">
+              <AdminBookCover livro={livroParaExcluir} />
+
+              <div className="popup-details">
+                <span>Autor: {livroParaExcluir.autor}</span>
+                <span>Categoria: {livroParaExcluir.categoria}</span>
+                <span>Estoque: {livroParaExcluir.estoque}</span>
+                <span>
+                  Compra: {formatarMoeda(livroParaExcluir.precoCompra)}
+                </span>
+              </div>
+            </div>
+
+            <p className="danger-note">
+              Essa ação só será permitida se o livro não tiver pedidos
+              vinculados. Caso tenha pedidos, pause o livro em vez de excluir.
+            </p>
+
+            <div className="popup-actions">
+              <button
+                className="btn btn-outline"
+                onClick={() => setLivroParaExcluir(null)}
+                disabled={excluindo}
+              >
+                Cancelar
+              </button>
+
+              <button
+                className="btn btn-danger"
+                onClick={confirmarExclusao}
+                disabled={excluindo}
+              >
+                {excluindo ? "Excluindo..." : "Confirmar exclusão"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
